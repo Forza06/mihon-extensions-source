@@ -3,8 +3,6 @@ package eu.kanade.tachiyomi.extension.pt.imperiodabritannia
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import okhttp3.OkHttpClient
-import okhttp3.internal.http.HTTP_FORBIDDEN
-import okhttp3.internal.http.HTTP_OK
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -17,17 +15,9 @@ class ImperioDaBritannia : Madara(
 ) {
 
     override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(1, 2, TimeUnit.SECONDS)
+        .rateLimit(2, 1, TimeUnit.SECONDS)
+        .connectTimeout(1, TimeUnit.MINUTES)
         .readTimeout(1, TimeUnit.MINUTES)
-        .addInterceptor { chain ->
-            val response = chain.proceed(chain.request())
-            if (response.code == HTTP_FORBIDDEN) {
-                return@addInterceptor response.newBuilder()
-                    .code(HTTP_OK)
-                    .build()
-            }
-            response
-        }
         .build()
 
     override val useNewChapterEndpoint = true

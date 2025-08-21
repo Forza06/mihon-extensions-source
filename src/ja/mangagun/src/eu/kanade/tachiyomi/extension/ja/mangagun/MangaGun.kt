@@ -31,6 +31,17 @@ class MangaGun : FMReader("MangaGun", "https://$DOMAIN", "ja") {
 
     override fun popularMangaRequest(page: Int): Request = mangaRequest("views", page)
 
+    override fun popularMangaFromElement(element: Element): SManga {
+        return SManga.create().apply {
+            element.select(headerSelector).let {
+                setUrlWithoutDomain(it.attr("abs:href"))
+                title = it.text()
+            }
+            thumbnail_url = element.select("img, .thumb-wrapper .img-in-ratio").attr("style")
+                .substringAfter("background-image:url(").substringBefore(")")
+        }
+    }
+
     override fun latestUpdatesRequest(page: Int): Request = mangaRequest("last_update", page)
 
     override fun getImgAttr(element: Element?): String? {
@@ -48,7 +59,7 @@ class MangaGun : FMReader("MangaGun", "https://$DOMAIN", "ja") {
     }
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        val slug = manga.url.substringAfter("manga-").substringBefore(".html")
+        val slug = manga.url.substringAfter("raw-").substringBefore(".html")
 
         return client.newCall(
             GET(

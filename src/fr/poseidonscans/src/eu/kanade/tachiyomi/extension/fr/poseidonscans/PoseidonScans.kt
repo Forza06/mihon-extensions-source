@@ -27,7 +27,7 @@ import java.util.TimeZone
 class PoseidonScans : HttpSource() {
 
     override val name = "Poseidon Scans"
-    override val baseUrl = "https://poseidonscans.fr"
+    override val baseUrl = "https://poseidonscans.com"
     override val lang = "fr"
     override val supportsLatest = true
     override val versionId = 2
@@ -392,7 +392,10 @@ class PoseidonScans : HttpSource() {
             ?.mapNotNull { ch ->
                 val chapterNumberString = ch.number.toString().removeSuffix(".0")
                 SChapter.create().apply {
-                    name = ch.title?.takeIf { it.isNotBlank() } ?: "Chapitre $chapterNumberString"
+                    val baseName = "Chapitre $chapterNumberString"
+                    name = ch.title?.trim()?.takeIf { it.isNotBlank() }
+                        ?.let { title -> "$baseName - $title" }
+                        ?: baseName
                     setUrlWithoutDomain("/serie/${mangaDto.slug}/chapter/$chapterNumberString")
                     date_upload = parseIsoDate(ch.createdAt)
                     chapter_number = ch.number
