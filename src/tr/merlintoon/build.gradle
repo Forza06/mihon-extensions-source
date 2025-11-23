@@ -1,0 +1,9 @@
+ext {
+    extName = 'MerlinToon'
+    extClass = '.MerlinToon'
+    baseUrl = 'https://merlintoon.com'
+    extVersionCode = 2
+    isNsfw = false
+}
+
+apply from: "$rootDir/common.gradle"
