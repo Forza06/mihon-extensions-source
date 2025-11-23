@@ -1,10 +1,14 @@
 ext {
     extName = 'Alucard Scans'
-    extClass = '.Alucardscans'
-    themePkg = 'mangathemesia'
+    extClass = '.AlucardScans'
     baseUrl = 'https://alucardscans.com'
-    overrideVersionCode = 0
+    extVersionCode = 1
     isNsfw = false
 }
 
 apply from: "$rootDir/common.gradle"
+
+dependencies {
+    // Bu satır önemli: AlucardScans.kt içindeki json işlemleri için gerekli
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.5.0"
+}
