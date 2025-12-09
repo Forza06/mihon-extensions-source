@@ -29,15 +29,17 @@ class MerlinToon : ParsedHttpSource() {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    // Resim boyutlarını (örn: -450x600, -193x278 vb.) silmek için dinamik Regex deseni
+    // Bu desen "-SAYIxSAYI" formatındaki tüm uzantıları yakalar.
+    private val imgDimensionRegex = Regex("-\\d+x\\d+")
+
     // ==============================
     // 1. POPÜLER MANGALAR (JSON API)
     // ==============================
     override fun popularMangaRequest(page: Int): Request {
-        // API genellikle tüm zamanların en iyilerini tek seferde döner
         return GET("$baseUrl/wp-json/initmanga/v1/top-ranking?range=all_time", headers)
     }
 
-    // JSON kullandığımız için HTML selectorları devre dışı
     override fun popularMangaSelector() = throw UnsupportedOperationException("JSON kullanılıyor")
     override fun popularMangaFromElement(element: Element) = throw UnsupportedOperationException("JSON kullanılıyor")
     override fun popularMangaNextPageSelector() = null
@@ -47,7 +49,6 @@ class MerlinToon : ParsedHttpSource() {
         val result = json.decodeFromString<TopRankingResponse>(jsonString)
 
         val mangas = result.posts.map { post ->
-            // API, JSON içinde HTML string döndürüyor. Bunu Jsoup ile parse ediyoruz.
             val doc = Jsoup.parseBodyFragment(post.html)
 
             SManga.create().apply {
@@ -56,7 +57,9 @@ class MerlinToon : ParsedHttpSource() {
 
                 title = titleElement?.text()?.trim() ?: "Bilinmeyen"
                 setUrlWithoutDomain(titleElement?.attr("href") ?: "")
-                thumbnail_url = imgElement?.attr("src")
+
+                // Kapak görselinden boyut ekini temizle
+                thumbnail_url = processCoverUrl(imgElement?.attr("src"))
             }
         }
 
@@ -80,10 +83,12 @@ class MerlinToon : ParsedHttpSource() {
         title = titleElement?.text()?.trim() ?: "Bilinmeyen İsim"
         setUrlWithoutDomain(titleElement?.attr("href") ?: "")
 
-        // Lazy load kontrolü (data-src yoksa src al)
-        thumbnail_url = imgElement?.let { img ->
+        val rawUrl = imgElement?.let { img ->
             img.attr("data-src").ifEmpty { img.attr("src") }
         }
+
+        // Kapak görselinden boyut ekini temizle
+        thumbnail_url = processCoverUrl(rawUrl)
     }
 
     // ==============================
@@ -107,10 +112,11 @@ class MerlinToon : ParsedHttpSource() {
 
         val mangas = results.map { dto ->
             SManga.create().apply {
-                // API başlık içinde <mark> etiketleri gönderiyor, temizliyoruz
                 title = Jsoup.parse(dto.title).text()
                 url = dto.url.replace(baseUrl, "")
-                thumbnail_url = dto.thumb
+
+                // Kapak görselinden boyut ekini temizle
+                thumbnail_url = processCoverUrl(dto.thumb)
             }
         }
 
@@ -132,7 +138,18 @@ class MerlinToon : ParsedHttpSource() {
         val statusText = document.select("#manga-status").text()
         status = parseStatus(statusText)
 
-        thumbnail_url = document.select("div.story-cover-wrap img").attr("src")
+        // Detay sayfasındaki kapak görselini al
+        val imgElement = document.selectFirst("div.story-cover-wrap img")
+        val rawUrl = imgElement?.let { img ->
+            img.attr("data-src").ifEmpty {
+                img.attr("data-lazy-src").ifEmpty {
+                    img.attr("src")
+                }
+            }
+        }
+
+        // Kapak görselinden boyut ekini temizle (HQ Kapak)
+        thumbnail_url = processCoverUrl(rawUrl)
     }
 
     // ==============================
@@ -146,17 +163,13 @@ class MerlinToon : ParsedHttpSource() {
 
         val rawName = element.select("h3").text().trim()
 
-        // İsim Temizleme: "Seri Adı - Bölüm 5" -> "Bölüm 5"
-        // Tireden sonrasını al, eğer tire yoksa olduğu gibi bırak
         var cleanName = rawName
         if (rawName.contains("-") || rawName.contains("–")) {
             cleanName = rawName.substringAfterLast("-").substringAfterLast("–").trim()
         }
 
-        // Eğer isim sadece sayıdan ibaret kalırsa başına "Bölüm" ekle
         name = if (cleanName.all { it.isDigit() }) "Bölüm $cleanName" else cleanName
 
-        // Kilitli bölüm kontrolü
         if (element.selectFirst("span[uk-icon*='lock']") != null) {
             name = "🔒 $name"
         }
@@ -171,16 +184,25 @@ class MerlinToon : ParsedHttpSource() {
     // 6. SAYFA LİSTESİ
     // ==============================
     override fun pageListParse(document: Document): List<Page> {
-        // Kilitli bölüm kontrolü
         if (document.selectFirst("h3.uk-card-title:contains(Kilitli Bölüm)") != null) {
             throw Exception("Bu bölüm kilitli. Okumak için WebView üzerinden giriş yapmalısınız.")
         }
 
         val pages = mutableListOf<Page>()
-        document.select("#chapter-content img").forEachIndexed { i, img ->
-            val url = img.attr("data-original-src").ifEmpty { img.attr("src") }
-            if (url.isNotBlank()) {
-                pages.add(Page(i, "", url))
+        val seenUrls = mutableSetOf<String>() // Aynı resim URL'lerinin tekrar eklenmesini önlemek için
+
+        document.select("#chapter-content img").forEach { img ->
+            val url = img.attr("data-original-src").ifEmpty {
+                img.attr("data-src").ifEmpty {
+                    img.attr("data-lazy-src").ifEmpty {
+                        img.attr("src")
+                    }
+                }
+            }
+
+            // Sadece HTTP linklerini al VE daha önce listeye eklenmemişse ekle
+            if (url.startsWith("http") && seenUrls.add(url)) {
+                pages.add(Page(pages.size, "", url))
             }
         }
         return pages
@@ -191,6 +213,16 @@ class MerlinToon : ParsedHttpSource() {
     // ==============================
     // YARDIMCI FONKSİYONLAR
     // ==============================
+
+    /**
+     * URL'deki boyut bilgisini (örn: -450x600, -300x300 vb.) silerek orijinal resmi döndürür.
+     * Girdi: .../Resim-450x600.webp
+     * Çıktı: .../Resim.webp
+     */
+    private fun processCoverUrl(url: String?): String? {
+        if (url.isNullOrEmpty()) return null
+        return url.replace(imgDimensionRegex, "")
+    }
 
     private fun parseStatus(status: String) = when {
         status.contains("Devam", ignoreCase = true) -> SManga.ONGOING
@@ -226,7 +258,6 @@ class MerlinToon : ParsedHttpSource() {
         }
     }
 
-    // CSS Seçicileri ve Sabitler
     companion object {
         object Selectors {
             const val CARD = "div.uk-panel"
@@ -236,7 +267,7 @@ class MerlinToon : ParsedHttpSource() {
 }
 
 // ==============================
-// DTO MODELLERİ (JSON Data Classes)
+// DTO MODELLERİ
 // ==============================
 
 @Serializable
@@ -256,5 +287,5 @@ data class TopRankingResponse(
 @Serializable
 data class TopRankingPost(
     val id: Int,
-    val html: String, // İçinde HTML div'leri barındıran string
+    val html: String,
 )
