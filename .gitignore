@@ -12,3 +12,7 @@ gen
 generated-src/
 .kotlin
 *.jks
+
+# Ignore all language folders except Turkish
+/src/*
+!/src/tr/
