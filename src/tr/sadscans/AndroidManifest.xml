@@ -14,8 +14,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data
-                    android:host="sadscans.com"
-                    android:pathPattern="/series/..*"
+                    android:host="sadscans.net"
+                    android:pathPattern="/seriler/..*"
                     android:scheme="https" />
             </intent-filter>
         </activity>
